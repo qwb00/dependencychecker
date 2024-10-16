@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'application'
 }
 
 group = 'org.example'
@@ -10,10 +11,114 @@ repositories {
 }
 
 dependencies {
-    testImplementation platform('org.junit:junit-bom:5.9.1')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
+    implementation 'org.ow2.asm:asm:9.4'
+    implementation 'org.ow2.asm:asm-commons:9.4'
 }
 
-test {
-    useJUnitPlatform()
+application {
+    mainClass.set('org.example.Main')
+}
+
+// Task to run application
+tasks.register('runChecker', JavaExec) {
+    group = 'Application'
+    description = 'Runs the dependency checker with specified main class and JAR files.'
+    mainClass.set(application.mainClass)
+    classpath = sourceSets.main.runtimeClasspath
+    args = project.hasProperty('appArgs') ? project.appArgs.toString().split(',').toList() : []
+}
+
+tasks.named('runChecker') {
+    dependsOn 'classes'
+}
+
+// --------------------
+// Test Cases
+// --------------------
+
+def testCases = [
+        [
+                name: 'testCase1',
+                expected: false,
+                mainClass: 'com.jetbrains.internship2024.ClassB',
+                jars: ['ModuleB-1.0.jar']
+        ],
+        [
+                name: 'testCase2',
+                expected: true,
+                mainClass: 'com.jetbrains.internship2024.ClassB',
+                jars: ['ModuleA-1.0.jar', 'ModuleB-1.0.jar']
+        ],
+        [
+                name: 'testCase3',
+                expected: true,
+                mainClass: 'com.jetbrains.internship2024.ClassA',
+                jars: ['ModuleA-1.0.jar']
+        ],
+        [
+                name: 'testCase4',
+                expected: false,
+                mainClass: 'com.jetbrains.internship2024.SomeAnotherClass',
+                jars: ['ModuleA-1.0.jar']
+        ],
+        [
+                name: 'testCase5',
+                expected: true,
+                mainClass: 'com.jetbrains.internship2024.SomeAnotherClass',
+                jars: ['ModuleA-1.0.jar', 'commons-io-2.16.1.jar']
+        ],
+        [
+                name: 'testCase6',
+                expected: true,
+                mainClass: 'com.jetbrains.internship2024.ClassB1',
+                jars: ['ModuleB-1.0.jar']
+        ],
+]
+
+// Create a task for each test case
+testCases.each { testCase ->
+    tasks.register(testCase.name, JavaExec) {
+        group = 'Verification'
+        description = "Runs ${testCase.name} to verify dependency checking."
+
+        dependsOn 'build'
+
+        mainClass.set(application.mainClass)
+        classpath = sourceSets.main.runtimeClasspath
+
+        // Build the arguments list
+        def jarPaths = testCase.jars.collect { jarName ->
+            file("${projectDir}/test_cases/build/libs/${jarName}").absolutePath
+        }
+
+        args = [testCase.mainClass] + jarPaths
+
+        // Capture the output
+        standardOutput = new ByteArrayOutputStream()
+        errorOutput = standardOutput
+        setIgnoreExitValue(true)
+
+        doLast {
+            def output = standardOutput.toString()
+
+            def actualResult = output.contains('All dependencies are satisfied.')
+
+            if (actualResult == testCase.expected) {
+                println "${testCase.name}: PASSED"
+            } else {
+                println "${testCase.name}: FAILED"
+                println "Expected: ${testCase.expected ? 'Success' : 'Failure'}"
+                println "Actual Output:"
+                println output
+            }
+        }
+    }
+}
+
+// Task to run all test cases
+tasks.register('runAllTests') {
+    group = 'Verification'
+    description = 'Runs all test cases.'
+
+    dependsOn testCases.collect { it.name }
 }
